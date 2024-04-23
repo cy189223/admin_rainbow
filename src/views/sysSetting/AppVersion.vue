@@ -1,0 +1,345 @@
+<template>
+  <div class="list">
+    <div class="content-head" style="margin-bottom: 20px;">
+      <div class="sort-keys">
+        <!-- <a-input placeholder="输入关键字" style="width: 180px;margin-right:10px;" v-model="key" allowClear :size="size" -->
+          <!-- @input="onSearch" /> -->
+        <!-- <a-button :size="size" type="primary" @click="refreshData" style="margin-right:10px;">刷新</a-button> -->
+
+        <!-- <a-select style="width: 150px;margin-right:10px;" v-model="category_id" placeholder="分类" allowClear>
+          <a-select-option :value="item.id" v-for="item in category" :key="item.id">{{ item.title }}</a-select-option>
+        </a-select> -->
+
+      </div>
+      <a-button type="primary" icon="plus" @click="handleCreate" v-if="!selectMode">创建{{resourceTypeText}}</a-button>
+    </div>
+    <a-table class="table" :rowKey="row => row.uuid" :dataSource="list" :pagination="pagination" :size="size">
+      <a-table-column title="版本" width="100px">
+        <template slot-scope="row">
+          <template>
+            {{row.version}}
+          </template>
+        </template>
+      </a-table-column>
+      <a-table-column title="系统" width="100px">
+        <template slot-scope="row">
+          {{row.os_type}}
+        </template>
+      </a-table-column>
+      <a-table-column title="安装包类型" width="40px">
+        <template slot-scope="row">
+          <span v-if="row.package_type === 'wgt'">
+            Wgt安装包
+          </span>
+          <span v-else>
+            普通安装包
+          </span>
+        </template>
+      </a-table-column>
+      <a-table-column title="安装包链接" width="50px">
+        <template slot-scope="row">
+          <a :href="row.package_url" target="_blank">查看链接</a>
+          <!-- {{row.package_url}} -->
+        </template>
+      </a-table-column>
+      <!-- <a-table-column title="排序" width="60px" v-if="!selectMode">
+        <template slot-scope="row">
+          {{row.list_weight}}
+          <span @click="handleEditListWeight(row)" style="margin-left: 10px;"><a href="javascript:;">
+              <a-icon type="edit" /></a></span>
+        </template>
+      </a-table-column>
+      <a-table-column title="推荐置顶" width="40px" v-if="!selectMode">
+        <template slot-scope="row">
+          <ISwitch :value="row.is_recommend" :active="1" :unactive="0" @change="recommendStatusChange($event, row)" />
+        </template>
+      </a-table-column> -->
+      <a-table-column title="创建日期" dataIndex="created_at" width="80px">
+        <template slot-scope="created_at">
+          <span>{{ created_at | onlyDay }}</span>
+        </template>
+      </a-table-column>
+      <a-table-column title="操作" width="100px" v-if="!selectMode">
+        <template slot-scope="row">
+          <span>
+            <a href="javascript:;" @click="handleEdit(row)">编辑</a>
+            <a-divider type="vertical" />
+            <a href="javascript:;" @click="handleDelete(row)">删除</a>
+          </span>
+        </template>
+      </a-table-column>
+    </a-table>
+
+    <a-modal :title="(editUuid ? '编辑' : '创建') + resourceTypeText" style="top: 100px;" :visible="isEdit" width="1000px"
+      @cancel="isEdit = false" :footer="null">
+      <EditForm v-if="isEdit" :uuid="editUuid" @cancel="isEdit = false" @success="fetchData"></EditForm>
+    </a-modal>
+  </div>
+</template>
+<script>
+  import moment from 'moment'
+  import ISwitch from '@/components/ISwitch/ISwitch'
+
+  import EditForm from "./EditAppVersion.vue"
+  const resourceType = 'app-versions'
+  const resourceTypeText = 'App版本'
+
+  export default {
+    components: {
+      ISwitch,
+      EditForm
+    },
+    props: {
+      selectMode: {
+        type: Boolean
+      },
+      params: {
+        type: Object
+      },
+      size: {
+        type: String,
+        default: 'default'
+      }
+    },
+    data() {
+      return {
+        isEdit: false,
+        editUuid: '',
+        resourceTypeText,
+        exportOptions: {
+          status: 'all',
+          startTime: '',
+          endTime: '',
+          type: 'normal'
+        },
+        list: [],
+        page: 1,
+        per_page: 10,
+        total: 0,
+        key: '',
+        category_id: undefined
+      }
+    },
+    watch: {
+      params() {
+        this.refreshData()
+      },
+      category_id() {
+        this.refreshData()
+      }
+    },
+    computed: {
+      pagination() {
+        return {
+          defaultPageSize: this.per_page,
+          defaultCurrent: this.page,
+          total: this.total,
+          onChange: (e) => {
+            this.page = e
+            this.fetchData()
+          }
+        }
+      }
+    },
+    filters: {},
+    created() {
+      this.fetchData()
+      // this.getCategoryList()
+    },
+    methods: {
+      setTop(row) {
+        this.$confirm({
+          title: '提示',
+          content: `确认要置顶此帖子吗？`,
+          onOk: () => {
+            this.$http.put(`/${resourceType}/${row.uuid}`, {
+              type: 'set_top'
+            }).then(res => {
+              this.fetchData()
+            })
+          }
+        })
+      },
+      unsetTop(row) {
+        this.$confirm({
+          title: '提示',
+          content: `确认要取消置顶此帖子吗？`,
+          onOk: () => {
+            this.$http.put(`/${resourceType}/${row.uuid}`, {
+              type: 'unset_top'
+            }).then(res => {
+              this.fetchData()
+            })
+          }
+        })
+      },
+      handleDelete(row) {
+        this.$confirm({
+          title: '提示',
+          content: `确认删除吗？`,
+          onOk: () => {
+            this.$http.delete(`/${resourceType}/${row.uuid}`).then(res => {
+              this.fetchData()
+            })
+          }
+        })
+      },
+      updateItem(row, data) {
+        return this.$http.patch(`/${resourceType}/${row.uuid}`, {
+          type: 'update',
+          attributes: {
+            ...data
+          }
+        })
+      },
+      recommendStatusChange(e, row) {
+        this.updateItem(row, {
+          is_recommend: e
+        }).then(res => {
+          this.fetchData()
+        })
+      },
+      listedStatusChange(e, row) {
+        this.updateItem(row, {
+          status: e
+        }).then(res => {
+          this.fetchData()
+        })
+      },
+      handleEditListWeight(row) {
+        this.$globalForm.show({
+          title: '编辑排序',
+          items: [{
+            type: 'number',
+            key: 'list_weight',
+            title: '排序',
+            default: row.list_weight,
+            required: true
+          }, ],
+          success: (data) => {
+            this.updateItem(row, {
+              ...data
+            }).then(res => {
+              this.$message.success('保存成功');
+              this.$globalForm.hide()
+              this.fetchData()
+            })
+          }
+        })
+      },
+      handleCreate() {
+        this.editUuid = ""
+        this.isEdit = true
+      },
+      handleEdit(row) {
+        this.editUuid = row.uuid
+        this.isEdit = true
+      },
+      refreshData() {
+        this.page = 1
+        this.key = ''
+        this.fetchData()
+      },
+      onSearch(e) {
+        this.fetchData()
+        // clearTimeout(this.timeout)
+        // this.timeout = setTimeout(() => {
+        //   this.fetchData()
+        // }, 300)
+      },
+      fetchData() {
+        this.isEdit = false
+        this.$http.get(`/${resourceType}`, {
+          params: {
+            ...this.params,
+            page: this.page,
+            per_page: this.per_page,
+            key: this.key,
+            category_id: this.category_id
+          }
+        }).then(res => {
+          this.list = res.data.list
+          this.total = res.data.item_total
+        }).finally(() => {
+          this.loading = false
+        })
+      },
+      getCategoryList() {
+        this.$api.emit('category.list', 'article').then(res => {
+          this.category = res.data.list
+        })
+      },
+    }
+  }
+</script>
+<style lang="scss" scoped>
+  .top-btn {
+    background: #1890FF;
+    color: white;
+    cursor: pointer;
+    font-size: 80%;
+    border-radius: 4px;
+    padding: 2px 6px;
+
+    &.unset {
+      border: 1px solid #D8D5D5;
+      background: #D8D5D5;
+      color: gray;
+    }
+  }
+
+  .content-head {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .table {
+    .thumb {
+      height: 60px;
+      border-radius: 6px;
+    }
+
+    .content-image {
+      height: 60px;
+      width: 60px;
+      margin-right: 10px;
+      margin-bottom: 10px;
+      object-fit: cover;
+      border-radius: 10px;
+      cursor: pointer;
+
+      &:hover {
+        opacity: 0.8;
+      }
+    }
+
+    .user {
+      display: flex;
+      // flex-wrap: wrap;
+      align-items: center;
+
+      img {
+        width: 26px;
+        height: 26px;
+        margin-right: 6px;
+        border-radius: 50%;
+        overflow: hidden;
+      }
+
+      .gender-man,
+      .gender-woman {
+        margin-left: 5px;
+        font-size: 12px;
+      }
+
+      .gender-man {
+        color: #409EFF;
+      }
+
+      .gender-woman {
+        color: #F56C6C;
+      }
+    }
+  }
+</style>
